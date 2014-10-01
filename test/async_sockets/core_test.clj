@@ -1,7 +1,7 @@
-(ns async-socket-server.core-test
+(ns async-sockets.core-test
   (:import  [java.net Socket InetAddress])
   (:require [clojure.test :refer :all]
-            [async-socket-server.core :refer :all]
+            [async-sockets.core :refer :all]
             [com.stuartsierra.component :as component]
             [clojure.core.async :as async]))
 

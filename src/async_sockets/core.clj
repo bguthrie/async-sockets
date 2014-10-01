@@ -1,4 +1,4 @@
-(ns async-socket-server.core
+(ns async-sockets.core
   (:require [clojure.java.io :as io]
             [clojure.core.async :as async]
             [clojure.tools.logging :as log]
