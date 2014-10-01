@@ -8,7 +8,7 @@
 
 (set! *warn-on-reflection* true)
 
-(def system-newline
+(def system-newline ;; This is in clojure.core but marked private.
   (System/getProperty "line.separator"))
 
 (defprotocol IClojureSocket
@@ -29,7 +29,10 @@
       (socket-open? [_]
         (not (.isClosed socket)))
       (socket-close! [this]
-        (when (socket-open? this) (doto socket (.shutdownInput) (.shutdownOutput) (.close)))))))
+        (when-not (.isInputShutdown socket) (.shutdownInput socket))
+        (when-not (.isOutputShutdown socket) (.shutdownOutput socket))
+        (when (socket-open? this) (.close socket)))
+      )))
 
 (defn- close-all [sockable in-ch out-ch]
   (socket-close! sockable)
@@ -94,7 +97,7 @@
   (start [this]
     (let [raw-socket (Socket. address port)
           socket (wrap-socket raw-socket)
-          [in out] (async-socket-channels socket)]
+          {:keys [in out]} (async-socket-channels socket)]
       (log/info "Opened socket connection opened on port" port)
       (assoc this :socket socket :in in :out out)))
 
@@ -106,6 +109,6 @@
 
 (defn socket-client
   ([port]
-   (socket-client (InetAddress/getLocalHost) port))
+   (socket-client port (InetAddress/getLocalHost)))
   ([port address]
    (map->AsyncSocketClient {:port port :address address})))

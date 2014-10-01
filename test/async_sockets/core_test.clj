@@ -7,7 +7,7 @@
 
 (def port   (int 55555))
 (def server (atom (socket-server port)))
-(def client (atom nil))
+(def client (atom (socket-client port)))
 
 (use-fixtures :each
   (fn [f]
@@ -17,20 +17,32 @@
         (reset! server (component/stop @server)))))
 
   (fn [f]
-    (reset! client (-> (InetAddress/getLocalHost) (Socket. port) (wrap-socket)))
+    (reset! client (component/start @client))
     (try (f)
       (finally
-        (socket-close! @client)
-        (reset! client nil))))
+        (reset! client (component/stop @client)))))
   )
 
 (deftest test-server-in-out
-  (let [conn-chan (:connections @server)
-        {:keys [in out]} (async/<!! conn-chan)]
+  (let [server-conn (async/<!! (:connections @server))
+        client-conn @client]
 
-    (socket-write @client "foo")
-    (is (= "foo" (async/<!! in)))
+    (async/>!! (:out client-conn) "foo")
+    (is (= "foo" (async/<!! (:in server-conn))))
 
-    (async/>!! out "bar")
-    (is (= "bar" (socket-read @client)))
+    (async/>!! (:out server-conn) "bar")
+    (is (= "bar" (async/<!! (:in client-conn))))
+    ))
+
+(deftest test-echo-server-in-out
+  (let [server-conn (async/<!! (:connections @server))
+        client-conn @client]
+
+    (async/go-loop []
+      (when-let [input (async/<! (:in server-conn))]
+        (async/>! (:out server-conn) (str "ECHO: " input))
+        (recur)))
+
+    (async/>!! (:out client-conn) "Hello, I'm Guybrush Threepwood")
+    (is (= "ECHO: Hello, I'm Guybrush Threepwood") (async/<!! (:in client-conn)))
     ))
