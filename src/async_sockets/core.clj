@@ -3,7 +3,7 @@
             [clojure.core.async :as async]
             [clojure.tools.logging :as log]
             [com.stuartsierra.component :as component])
-  (:import  [java.net Socket ServerSocket SocketException InetAddress]
+  (:import  [java.net Socket ServerSocket SocketException InetAddress InetSocketAddress]
             [java.io BufferedReader BufferedWriter]))
 
 (set! *warn-on-reflection* true)
@@ -11,48 +11,46 @@
 (def system-newline ;; This is in clojure.core but marked private.
   (System/getProperty "line.separator"))
 
-(defprotocol IClojureSocket
-  (socket-read   [this])
-  (socket-write  [this line])
-  (socket-open?  [this])
-  (socket-close! [this]))
+(defrecord AsyncSocket [^Socket socket ^InetSocketAddress address]
+  component/Lifecycle
 
-(defn wrap-socket [^Socket socket]
-  "Given a java.net.Socket, returns a reified IClojureSocket which handles buffered reading and writing. By default,
-   treats all input and output as distinct lines, and flushes on each write."
-  (let [^BufferedReader in (io/reader socket) ^BufferedWriter out (io/writer socket)]
-    (reify IClojureSocket
-      (socket-read [_]
-        (.readLine in))
-      (socket-write [_ line]
-        (.write out (str line system-newline)) (.flush out))
-      (socket-open? [_]
-        (not (.isClosed socket)))
-      (socket-close! [this]
-        (when-not (.isInputShutdown socket) (.shutdownInput socket))
-        (when-not (.isOutputShutdown socket) (.shutdownOutput socket))
-        (when (socket-open? this) (.close socket)))
-      )))
+  (start [this]
+    (when (or (.isClosed socket) (not (.isBound socket)))
+      (.connect socket address))
 
-(defn- close-all [sockable in-ch out-ch]
-  (socket-close! sockable)
-  (async/close! in-ch)
-  (async/close! out-ch))
+    (let [^BufferedReader in (io/reader socket)
+          ^BufferedWriter out (io/writer socket)
+          in-ch (async/chan)
+          out-ch (async/chan)
+          this (assoc this :in in-ch :out out-ch)]
 
-(defn- async-socket-channels [socket]
-  "Accepts a ClojureSocket and returns a pair (in, out) of async channels that read from the socket's input and write
-   to its output respectively. If nil is received from the socket, nil is received from the in-chan, or the socket
-   itself closes, closes both channels and the socket as necessary."
-  (let [in-ch (async/chan) out-ch (async/chan)]
-    (async/go-loop []
-      (if-let [line (and (socket-open? socket) (socket-read socket))]
-        (async/>! in-ch line)
-        (close-all socket in-ch out-ch)))
-    (async/go-loop []
-      (if-let [line (and (socket-open? socket) (async/<! out-ch))]
-        (socket-write socket line)
-        (close-all socket in-ch out-ch)))
-    {:in in-ch :out out-ch :socket socket}))
+      (async/go-loop []
+        (let [line (and (not (.isClosed socket)) (.readLine in))]
+          (if-not line
+            (component/stop this)
+            (do
+              (async/>! in-ch line)
+              (recur)))))
+
+      (async/go-loop []
+        (let [line (and (not (.isClosed socket)) (async/<! out-ch))]
+          (if-not line
+            (component/stop this)
+            (do
+              (.write out (str line system-newline))
+              (.flush out)
+              (recur)))))
+
+      this
+      ))
+
+  (stop [{:keys [in out] :as this}]
+    (when-not (.isInputShutdown socket)  (.shutdownInput socket))
+    (when-not (.isOutputShutdown socket) (.shutdownOutput socket))
+    (when-not (.isClosed socket)         (.close socket))
+    (async/close! in)
+    (async/close! out)
+    (dissoc this :socket :in :out)))
 
 (defn- async-socket-server-chan [^ServerSocket server]
   "Given a java.net.ServerSocket, returns a channel which yields a pair (in, out) of async channels for each new socket
@@ -63,8 +61,8 @@
         (try
           (async/>! ch (-> server
                            (.accept)
-                           (wrap-socket)
-                           (async-socket-channels)))
+                           (->AsyncSocket (.getLocalSocketAddress server))
+                           (component/start)))
           (log/info "New connection opened on port" (.getLocalPort server))
           (catch SocketException e
             (log/debug "Received socket exception" e)
@@ -92,23 +90,8 @@
 
 (defn socket-server [port] (->AsyncSocketServer port))
 
-(defrecord AsyncSocketClient [^Integer port ^InetAddress address]
-  component/Lifecycle
-  (start [this]
-    (let [raw-socket (Socket. address port)
-          socket (wrap-socket raw-socket)
-          {:keys [in out]} (async-socket-channels socket)]
-      (log/info "Opened socket connection opened on port" port)
-      (assoc this :socket socket :in in :out out)))
-
-  (stop [{:keys [socket in out] :as this}]
-    (when (socket-open? socket)
-      (close-all socket in out)
-      (log/info "Closing socket connection opened on port" port)
-      (dissoc this :socket :in :out))))
-
 (defn socket-client
   ([port]
    (socket-client port (InetAddress/getLocalHost)))
-  ([port address]
-   (map->AsyncSocketClient {:port port :address address})))
+  ([^Integer port ^InetAddress address]
+   (->AsyncSocket (Socket.) (InetSocketAddress. address port))))
