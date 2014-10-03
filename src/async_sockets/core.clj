@@ -11,6 +11,14 @@
 (def system-newline ;; This is in clojure.core but marked private.
   (System/getProperty "line.separator"))
 
+(defn- socket-open? [^Socket socket]
+  (not (or (.isClosed socket) (.isInputShutdown socket) (.isOutputShutdown socket))))
+
+(defn- socket-read-line-or-nil [^Socket socket ^BufferedReader in]
+  (when (socket-open? socket)
+    (try (.readLine in)
+      (catch SocketException e nil))))
+
 (defrecord AsyncSocket [^Socket socket ^InetSocketAddress address]
   component/Lifecycle
 
@@ -25,7 +33,7 @@
           this (assoc this :in in-ch :out out-ch)]
 
       (async/go-loop []
-        (let [line (and (not (.isClosed socket)) (.readLine in))]
+        (let [line (socket-read-line-or-nil socket in)]
           (if-not line
             (component/stop this)
             (do
@@ -33,7 +41,7 @@
               (recur)))))
 
       (async/go-loop []
-        (let [line (and (not (.isClosed socket)) (async/<! out-ch))]
+        (let [line (and (socket-open? socket) (async/<! out-ch))]
           (if-not line
             (component/stop this)
             (do
@@ -41,10 +49,12 @@
               (.flush out)
               (recur)))))
 
+      (log/info "New async socket opened on address" address)
       this
       ))
 
   (stop [{:keys [in out] :as this}]
+    (log/info "Closing async socket on address" address)
     (when-not (.isInputShutdown socket)  (.shutdownInput socket))
     (when-not (.isOutputShutdown socket) (.shutdownOutput socket))
     (when-not (.isClosed socket)         (.close socket))
@@ -63,7 +73,6 @@
                            (.accept)
                            (->AsyncSocket (.getLocalSocketAddress server))
                            (component/start)))
-          (log/info "New connection opened on port" (.getLocalPort server))
           (catch SocketException e
             (log/debug "Received socket exception" e)
             (async/close! ch))))
