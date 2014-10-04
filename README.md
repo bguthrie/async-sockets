@@ -4,12 +4,18 @@ A Clojure library for opening and working with sockets asynchronously.
 
 ## Usage
 
-This library uses the [Component](https://github.com/stuartsierra/component) framework for managing lifecycle. To
-start a server, create it using `(socket-server <port>)`, then start it using `(component/start <server>)`.
+This library can be used in two ways: first to run a socket server, created with `(socket-server <port>)`, and second
+to open a socket client, with `(socket-client <inet-address> <port>)`. In the future, more advanced options for both
+servers and clients with be added.
 
-Each server yields a record with a channel called `:connections`, which yields one socket (`AsyncSocket`) per incoming
+Creating a server returns a record with a channel named `:connections`, which yields one socket (`AsyncSocket`) per incoming
 connection. Each socket in turn exposes `:in`, a channel for receiving messages, `:out`, a channel for sending messages,
-and `:socket`, the raw `java.net.Socket` object, should you need it for something.
+and `:socket`, the raw `java.net.Socket` object, should you need it.
+
+This library uses the [Component](https://github.com/stuartsierra/component) framework for managing lifecycle. Once
+you've created a socket server or socket client, you must explicitly start it with `(component/start <server-or-client>)`.
+
+To start an asynchronous socket server, which in this case echoes every input received:
 
 ```clojure
 (ns user
@@ -31,7 +37,7 @@ and `:socket`, the raw `java.net.Socket` object, should you need it for somethin
         (recur)))))
 ```
 
-To connect to a remote server:
+To connect and send a message to a remote server `example.com`:
 
 ```clojure
 (ns user
@@ -40,7 +46,7 @@ To connect to a remote server:
             [clojure.core.async :as async])
   (:import  [java.net InetAddress]))
 
-(let [address (.getByName InetAddress "http://remote.host")
+(let [address (.getByName InetAddress "example.com")
       socket (component/start (socket/socket-client address 12345))]
   (async/>! socket "Hello, World"))
 ```
