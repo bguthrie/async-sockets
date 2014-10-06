@@ -2,6 +2,16 @@
 
 A Clojure library for opening and working with sockets asynchronously.
 
+## Releases
+
+`async-sockets` is published to [clojars.org](https://clojars.org). The latest stable release is `0.0.1-SNAPSHOT`.
+
+[Leiningen](http://leiningen.org) dependency information:
+
+```
+[com.gearswithingears/async-sockets "0.0.1-SNAPSHOT"]
+```
+
 ## Usage
 
 This library permits the creation of socket servers and remote socket clients in idiomatic Clojure. It uses
