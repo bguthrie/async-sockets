@@ -1,9 +1,9 @@
-(ns async-sockets.core-test
+(ns com.gearswithingears.async-sockets-test
   (:import  [java.net Socket InetAddress])
   (:require [clojure.test :refer :all]
             [clojure.core.async :as async]
             [clojure.tools.logging :as log]
-            [async-sockets.core :refer :all]
+            [com.gearswithingears.async-sockets :refer :all]
             [com.stuartsierra.component :as component]))
 
 (def port (int 55555))
