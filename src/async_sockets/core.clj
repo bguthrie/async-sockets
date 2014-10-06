@@ -69,8 +69,7 @@
     (async/go
       (while (and (not (.isClosed server)) (.isBound server))
         (try
-          (async/>! ch (-> server
-                           (.accept)
+          (async/>! ch (-> (.accept server)
                            (->AsyncSocket (.getLocalSocketAddress server))
                            (component/start)))
           (catch SocketException e
@@ -82,11 +81,11 @@
 (defn server-running? [{:keys [^ServerSocket server]}]
   (and server (not (.isClosed server))))
 
-(defrecord AsyncSocketServer [port]
+(defrecord AsyncSocketServer [^Integer port ^Integer backlog ^InetAddress bind-addr]
   component/Lifecycle
   (start [this]
     (when-not (server-running? this)
-      (let [server (ServerSocket. port)]
+      (let [server (ServerSocket. port backlog bind-addr)]
         (log/info "Starting async socket server on port" port)
         (assoc this :server server :connections (async-socket-server-chan server)))))
 
@@ -97,10 +96,32 @@
       (.close server)
       (dissoc this :server :connections))))
 
-(defn socket-server [port] (->AsyncSocketServer port))
+(defn- ^InetAddress localhost []
+  (InetAddress/getLocalHost))
+
+(defn- host-name [^InetAddress address]
+  (.getHostName address))
+
+(defn- ^InetAddress inet-address [host]
+  (if (instance? InetAddress host) host (InetAddress/getByName host)))
+
+(def ^Integer default-server-backlog 50) ;; derived from SocketServer.java
+
+(defn socket-server
+  "Given a port and optional backlog (the maximum queue length of incoming connection indications, 50 by default)
+   and an optional bind address (localhost by default), returns an AsyncSocketServer which must be explicitly
+   started and stopped by the consumer."
+  ([port]
+   (socket-server port default-server-backlog nil))
+  ([port backlog]
+   (socket-server port backlog nil))
+  ([port backlog bind-addr]
+   (->AsyncSocketServer (int port) (int backlog) (when bind-addr (inet-address bind-addr)))))
 
 (defn socket-client
+  "Given a port and an optional address (localhost by default), returns an AsyncSocket which must be explicitly
+   started and stopped by the consumer."
   ([port]
-   (socket-client port (InetAddress/getLocalHost)))
-  ([^Integer port ^InetAddress address]
+    (socket-client (int port) (host-name (localhost))))
+  ([^Integer port ^String address]
    (->AsyncSocket (Socket.) (InetSocketAddress. address port))))

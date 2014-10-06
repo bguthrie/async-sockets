@@ -23,7 +23,6 @@
       (finally
         (component/stop server)
         (component/stop client-sock)))
-
     ))
 
 (deftest test-server-repeated-messages
