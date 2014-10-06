@@ -6,8 +6,6 @@
   (:import  [java.net Socket ServerSocket SocketException InetAddress InetSocketAddress]
             [java.io BufferedReader BufferedWriter]))
 
-(set! *warn-on-reflection* true)
-
 (def system-newline ;; This is in clojure.core but marked private.
   (System/getProperty "line.separator"))
 
