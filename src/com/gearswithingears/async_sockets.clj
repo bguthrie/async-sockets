@@ -58,7 +58,7 @@
     (when-not (.isClosed socket)         (.close socket))
     (async/close! in)
     (async/close! out)
-    (dissoc this :socket :in :out)))
+    (assoc this :socket nil :in nil :out nil)))
 
 (defn- async-socket-server-chan [^ServerSocket server]
   "Given a java.net.ServerSocket, returns a channel which yields a pair (in, out) of async channels for each new socket
@@ -92,7 +92,7 @@
       (log/info "Stopping async socket server on port" port)
       (async/close! connections)
       (.close server)
-      (dissoc this :server :connections))))
+      (assoc this :server nil :connections nil))))
 
 (defn- ^InetAddress localhost []
   (InetAddress/getLocalHost))
