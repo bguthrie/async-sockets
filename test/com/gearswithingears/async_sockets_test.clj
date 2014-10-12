@@ -4,7 +4,8 @@
             [clojure.core.async :as async]
             [clojure.tools.logging :as log]
             [com.gearswithingears.async-sockets :refer :all]
-            [com.stuartsierra.component :as component]))
+            [com.stuartsierra.component :as component]
+            [clj-time.core :as time]))
 
 (def port (int 55555))
 
@@ -72,3 +73,50 @@
         (component/stop server)
         (component/stop client-sock)))
     ))
+
+(defn receive-until-secs-elapsed [limit out-chan socket]
+  (let [start-time (time/now)]
+    (async/go-loop [n 0]
+      (let [secs-elapsed (time/in-seconds (time/interval start-time (time/now)))
+            msg (async/<! (:in socket))]
+        (if (or (nil? msg) (= secs-elapsed limit))
+          (do (component/stop socket) (async/>! out-chan n))
+          (recur (inc n)))))))
+
+(defn send-indefinitely [socket id]
+  (async/go-loop [n 0]
+    (when (= 0 (mod n 100000)) (println "Sent" n "messages on socket" id))
+    (async/>! (:out socket) (str "message " n))
+    (recur (inc n))))
+
+(defn perftest-sockets [socket-count secs-limit]
+  (let [server (component/start (socket-server port))
+        client-socks (map (fn [_] (component/start (socket-client port))) (range socket-count))
+        server-socks (map (fn [_] (async/<!! (:connections server))) (range socket-count))
+        limit-minutes (/ 60 secs-limit)
+        out-chan (async/chan socket-count)]
+
+    (try
+
+      (doall
+        (map-indexed
+          (fn [idx sock] (send-indefinitely sock idx))
+          client-socks))
+
+      (doall
+        (map (partial receive-until-secs-elapsed secs-limit out-chan) server-socks))
+
+      (loop [n 0]
+        (when (< n socket-count)
+          (let [msgs-received (async/<!! out-chan)
+                msgs-per-minute (* msgs-received limit-minutes)]
+            (println (format "Socket %d received %d msgs in %d seconds (%f msgs/minute)" n msgs-received secs-limit (float msgs-per-minute)))
+            (recur (inc n)))))
+
+      (finally
+        (component/stop server)
+        (doall (map component/stop client-socks))))
+
+    ))
+
+;(perftest-sockets 4 10)

@@ -15,7 +15,19 @@
 (defn- socket-read-line-or-nil [^Socket socket ^BufferedReader in]
   (when (socket-open? socket)
     (try (.readLine in)
-      (catch SocketException e nil))))
+      (catch SocketException e
+        (log/error e)))))
+
+(defn- socket-write-line [^Socket socket ^BufferedWriter out line]
+  (if (socket-open? socket)
+    (try
+      (.write out (str line system-newline))
+      (.flush out)
+      true
+      (catch SocketException e
+        (log/error e)
+        false))
+    false))
 
 (defrecord AsyncSocket [^Socket socket ^InetSocketAddress address]
   component/Lifecycle
@@ -40,12 +52,15 @@
 
       (async/go-loop []
         (let [line (and (socket-open? socket) (async/<! out-ch))]
-          (if-not line
+          (if-not (socket-write-line socket out line)
             (component/stop this)
-            (do
-              (.write out (str line system-newline))
-              (.flush out)
-              (recur)))))
+            (recur))))
+          ;(if-not line
+          ;  (component/stop this)
+          ;  (do
+          ;    (.write out (str line system-newline))
+          ;    (.flush out)
+          ;    (recur)))))
 
       (log/info "New async socket opened on address" address)
       this
@@ -123,3 +138,7 @@
     (socket-client (int port) (host-name (localhost))))
   ([^Integer port ^String address]
    (->AsyncSocket (Socket.) (InetSocketAddress. address port))))
+
+
+
+

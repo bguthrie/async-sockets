@@ -7,4 +7,5 @@
   :dependencies [[org.clojure/core.async "0.1.346.0-17112a-alpha"]
                  [com.stuartsierra/component "0.2.2"]
                  [org.clojure/tools.logging "0.3.1"]]
-  :profiles {:dev {:dependencies [[org.clojure/clojure "1.6.0"]]}})
+  :profiles {:dev {:dependencies [[org.clojure/clojure "1.6.0"]
+                                  [clj-time "0.8.0"]]}})
