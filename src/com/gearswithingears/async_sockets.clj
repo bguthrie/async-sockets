@@ -1,8 +1,7 @@
 (ns com.gearswithingears.async-sockets
   (:require [clojure.java.io :as io]
             [clojure.core.async :as async]
-            [clojure.tools.logging :as log]
-            [com.stuartsierra.component :as component])
+            [clojure.tools.logging :as log])
   (:import  [java.net Socket ServerSocket SocketException InetAddress InetSocketAddress]
             [java.io BufferedReader BufferedWriter]))
 
@@ -29,85 +28,10 @@
         false))
     false))
 
-(defrecord AsyncSocket [^Socket socket ^InetSocketAddress address]
-  component/Lifecycle
-
-  (start [this]
-    (when (or (.isClosed socket) (not (.isBound socket)))
-      (.connect socket address))
-
-    (let [^BufferedReader in (io/reader socket)
-          ^BufferedWriter out (io/writer socket)
-          in-ch (async/chan)
-          out-ch (async/chan)
-          this (assoc this :in in-ch :out out-ch)]
-
-      (async/go-loop []
-        (let [line (socket-read-line-or-nil socket in)]
-          (if-not line
-            (component/stop this)
-            (do
-              (async/>! in-ch line)
-              (recur)))))
-
-      (async/go-loop []
-        (let [line (and (socket-open? socket) (async/<! out-ch))]
-          (if-not (socket-write-line socket out line)
-            (component/stop this)
-            (recur))))
-          ;(if-not line
-          ;  (component/stop this)
-          ;  (do
-          ;    (.write out (str line system-newline))
-          ;    (.flush out)
-          ;    (recur)))))
-
-      (log/info "New async socket opened on address" address)
-      this
-      ))
-
-  (stop [{:keys [in out] :as this}]
-    (log/info "Closing async socket on address" address)
-    (when-not (.isInputShutdown socket)  (.shutdownInput socket))
-    (when-not (.isOutputShutdown socket) (.shutdownOutput socket))
-    (when-not (.isClosed socket)         (.close socket))
-    (async/close! in)
-    (async/close! out)
-    (assoc this :socket nil :in nil :out nil)))
-
-(defn- async-socket-server-chan [^ServerSocket server]
-  "Given a java.net.ServerSocket, returns a channel which yields a pair (in, out) of async channels for each new socket
-   connection on the given port."
-  (let [ch (async/chan)]
-    (async/go
-      (while (and (not (.isClosed server)) (.isBound server))
-        (try
-          (async/>! ch (-> (.accept server)
-                           (->AsyncSocket (.getLocalSocketAddress server))
-                           (component/start)))
-          (catch SocketException e
-            (log/debug "Received socket exception" e)
-            (async/close! ch))))
-      (async/close! ch))
-    ch))
-
-(defn server-running? [{:keys [^ServerSocket server]}]
-  (and server (not (.isClosed server))))
-
-(defrecord AsyncSocketServer [^Integer port ^Integer backlog ^InetAddress bind-addr]
-  component/Lifecycle
-  (start [this]
-    (when-not (server-running? this)
-      (let [server (ServerSocket. port backlog bind-addr)]
-        (log/info "Starting async socket server on port" port)
-        (assoc this :server server :connections (async-socket-server-chan server)))))
-
-  (stop [{:keys [^ServerSocket server connections] :as this}]
-    (when (server-running? this)
-      (log/info "Stopping async socket server on port" port)
-      (async/close! connections)
-      (.close server)
-      (assoc this :server nil :connections nil))))
+(defrecord AsyncSocket
+  [^Socket socket ^InetSocketAddress address in-ch out-ch])
+(defrecord AsyncSocketServer
+  [^Integer port ^Integer backlog ^InetAddress bind-addr ^ServerSocket server connections])
 
 (defn- ^InetAddress localhost []
   (InetAddress/getLocalHost))
@@ -120,6 +44,61 @@
 
 (def ^Integer default-server-backlog 50) ;; derived from SocketServer.java
 
+(defn close-socket-client [{:keys [in out socket address] :as this}]
+  (log/info "Closing async socket on address" address)
+  (when-not (.isInputShutdown socket)  (.shutdownInput socket))
+  (when-not (.isOutputShutdown socket) (.shutdownOutput socket))
+  (when-not (.isClosed socket)         (.close socket))
+  (async/close! in)
+  (async/close! out)
+  (assoc this :socket nil :in nil :out nil))
+
+(defn- init-async-socket [^Socket socket ^InetSocketAddress address]
+  (let [^BufferedReader in (io/reader socket)
+        ^BufferedWriter out (io/writer socket)
+        in-ch (async/chan)
+        out-ch (async/chan)
+        public-socket (map->AsyncSocket {:socket socket :address address :in in-ch :out out-ch})]
+
+    (async/go-loop []
+      (let [line (socket-read-line-or-nil socket in)]
+        (if-not line
+          (close-socket-client public-socket)
+          (do
+            (async/>! in-ch line)
+            (recur)))))
+
+    (async/go-loop []
+      (let [line (and (socket-open? socket) (async/<! out-ch))]
+        (if-not (socket-write-line socket out line)
+          (close-socket-client public-socket)
+          (recur))))
+
+    (log/info "New async socket opened on address" address)
+    public-socket))
+
+(defn socket-client
+  "Given a port and an optional address (localhost by default), returns an AsyncSocket which must be explicitly
+   started and stopped by the consumer."
+  ([port]
+   (socket-client (int port) (host-name (localhost))))
+  ([^Integer port ^String address]
+   (let [socket (Socket.)
+         address (InetSocketAddress. address port)]
+
+     (.connect socket address)
+     (init-async-socket socket address))))
+
+(defn server-running? [{:keys [^ServerSocket server]}]
+  (and server (not (.isClosed server))))
+
+(defn stop-socket-server [{:keys [^ServerSocket server connections port] :as this}]
+  (when (server-running? this)
+    (log/info "Stopping async socket server on port" port)
+    (async/close! connections)
+    (.close server)
+    (assoc this :server nil :connections nil)))
+
 (defn socket-server
   "Given a port and optional backlog (the maximum queue length of incoming connection indications, 50 by default)
    and an optional bind address (localhost by default), returns an AsyncSocketServer which must be explicitly
@@ -129,16 +108,24 @@
   ([port backlog]
    (socket-server port backlog nil))
   ([port backlog bind-addr]
-   (->AsyncSocketServer (int port) (int backlog) (when bind-addr (inet-address bind-addr)))))
+   (let [java-server (ServerSocket. port backlog bind-addr)
+         conns (async/chan)
+         public-server (map->AsyncSocketServer
+                         {:port        (int port)
+                          :backlog     (int backlog)
+                          :bind-addr   (when bind-addr (inet-address bind-addr))
+                          :connections conns
+                          :server      java-server})]
+     (log/info "Starting async socket server on port" port)
 
-(defn socket-client
-  "Given a port and an optional address (localhost by default), returns an AsyncSocket which must be explicitly
-   started and stopped by the consumer."
-  ([port]
-    (socket-client (int port) (host-name (localhost))))
-  ([^Integer port ^String address]
-   (->AsyncSocket (Socket.) (InetSocketAddress. address port))))
+     (async/go-loop []
+       (if (and (not (.isClosed java-server)) (.isBound java-server))
+         (try
+           (async/>! conns
+             (init-async-socket (.accept java-server) (.getLocalSocketAddress java-server)))
+           (catch SocketException e
+             (log/error e)
+             (stop-socket-server public-server)))
+         (stop-socket-server public-server)))
 
-
-
-
+     public-server)))

@@ -29,20 +29,16 @@ created explicitly using this function or yielded by the `:connections` fields o
 channels, an `:in` channel for receiving messages and an `:out` channel for sending messages. The raw `java.net.Socket` 
 object is also available as `:socket`, should you need it.
 
-This library uses the [Component](https://github.com/stuartsierra/component) framework for managing lifecycle. Both
-socket servers and socket clients must be explicitly started using `(component/start <server-or-client>)`.
-
 To connect and send a message to a remote server `example.com`:
 
 ```clojure
 (ns user
   (:require [async-sockets.core :refer :all]
-            [com.stuartsierra.component :as component]
-            [clojure.core.async :as async])
-  (:import  [java.net InetAddress]))
+            [clojure.core.async :as async]))
 
-(let [socket (component/start (socket-client "example.com" 12345))]
-  (async/>! (:out socket) "Hello, World"))
+(let [socket (socket-client "example.com" 12345)]
+  (async/>!! (:out socket) "Hello, World")
+  (close-socket-client socket))
 ```
 
 To start an asynchronous socket server, which in this case echoes every input received:
@@ -50,7 +46,6 @@ To start an asynchronous socket server, which in this case echoes every input re
 ```clojure
 (ns user
   (:require [async-sockets.core :refer :all]
-            [com.stuartsierra.component :as component]
             [clojure.core.async :as async]))
    
 (defn echo-everything [socket]
@@ -59,7 +54,7 @@ To start an asynchronous socket server, which in this case echoes every input re
       (async/>! (:out socket) (str "ECHO: " line))
       (recur))))
    
-(let [server (component/start (socket-server 12345))]
+(let [server (socket-server 12345)]
   (async/go-loop []
     (when-let [connection (async/<! (:connections server))] 
       (echo-everything connection)

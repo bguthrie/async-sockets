@@ -4,14 +4,13 @@
             [clojure.core.async :as async]
             [clojure.tools.logging :as log]
             [com.gearswithingears.async-sockets :refer :all]
-            [com.stuartsierra.component :as component]
             [clj-time.core :as time]))
 
 (def port (int 55555))
 
 (deftest test-server-in-out
-  (let [server      (component/start (socket-server port))
-        client-sock (component/start (socket-client port))
+  (let [server      (socket-server port)
+        client-sock (socket-client port)
         server-sock (async/<!! (:connections server))]
 
     (try
@@ -22,13 +21,13 @@
       (is (= "Pong" (async/<!! (:in client-sock))))
 
       (finally
-        (component/stop server)
-        (component/stop client-sock)))
+        (stop-socket-server server)
+        (close-socket-client client-sock)))
     ))
 
 (deftest test-server-repeated-messages
-  (let [server      (component/start (socket-server port))
-        client-sock (component/start (socket-client port))
+  (let [server      (socket-server port)
+        client-sock (socket-client port)
         server-sock (async/<!! (:connections server))]
 
     (try
@@ -51,13 +50,13 @@
       (is (= "Pong 3") (async/<!! (:in client-sock)))
 
       (finally
-        (component/stop server)
-        (component/stop client-sock)))
+        (stop-socket-server server)
+        (close-socket-client client-sock)))
     ))
 
 (deftest test-echo-server
-  (let [server      (component/start (socket-server port))
-        client-sock (component/start (socket-client port))
+  (let [server      (socket-server port)
+        client-sock (socket-client port)
         server-sock (async/<!! (:connections server))]
 
     (try
@@ -70,8 +69,8 @@
       (is (= "ECHO: Hello, I'm Guybrush Threepwood") (async/<!! (:in client-sock)))
 
       (finally
-        (component/stop server)
-        (component/stop client-sock)))
+        (stop-socket-server server)
+        (close-socket-client client-sock)))
     ))
 
 (defn receive-until-secs-elapsed [limit out-chan socket]
@@ -80,7 +79,7 @@
       (let [secs-elapsed (time/in-seconds (time/interval start-time (time/now)))
             msg (async/<! (:in socket))]
         (if (or (nil? msg) (= secs-elapsed limit))
-          (do (component/stop socket) (async/>! out-chan n))
+          (do (close-socket-client socket) (async/>! out-chan n))
           (recur (inc n)))))))
 
 (defn send-indefinitely [socket id]
@@ -90,11 +89,11 @@
     (recur (inc n))))
 
 (defn perftest-sockets [socket-count secs-limit]
-  (let [server (component/start (socket-server port))
-        client-socks (map (fn [_] (component/start (socket-client port))) (range socket-count))
-        server-socks (map (fn [_] (async/<!! (:connections server))) (range socket-count))
+  (let [server        (socket-server port)
+        client-socks  (map socket-client (range socket-count))
+        server-socks  (map (fn [_] (async/<!! (:connections server))) (range socket-count))
         limit-minutes (/ 60 secs-limit)
-        out-chan (async/chan socket-count)]
+        out-chan      (async/chan socket-count)]
 
     (try
 
@@ -114,8 +113,8 @@
             (recur (inc n)))))
 
       (finally
-        (component/stop server)
-        (doall (map component/stop client-socks))))
+        (stop-socket-server server)
+        (doall (map close-socket-client client-socks))))
 
     ))
 
