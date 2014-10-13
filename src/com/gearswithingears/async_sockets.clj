@@ -110,7 +110,7 @@
    (socket-server port backlog nil))
   ([port backlog bind-addr]
    (let [java-server (ServerSocket. port backlog bind-addr)
-         conns (async/chan)
+         conns (async/chan backlog)
          public-server (map->AsyncSocketServer
                          {:port        (int port)
                           :backlog     (int backlog)
