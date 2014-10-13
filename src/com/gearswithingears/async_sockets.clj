@@ -21,7 +21,7 @@
   (if (socket-open? socket)
     (try
       (.write out (str line system-newline))
-      (.flush out)
+      (when *flush-on-newline* (.flush out))
       true
       (catch SocketException e
         (log/error e)
@@ -79,7 +79,7 @@
 
 (defn socket-client
   "Given a port and an optional address (localhost by default), returns an AsyncSocket which must be explicitly
-   started and stopped by the consumer."
+   started and stopped by the consumer. Observes value of *flush-on-newline* var for purposes of socket flushing."
   ([port]
    (socket-client (int port) (host-name (localhost))))
   ([^Integer port ^String address]
@@ -101,8 +101,9 @@
 
 (defn socket-server
   "Given a port and optional backlog (the maximum queue length of incoming connection indications, 50 by default)
-   and an optional bind address (localhost by default), returns an AsyncSocketServer which must be explicitly
-   started and stopped by the consumer."
+   and an optional bind address (localhost by default), starts and returns a socket server and a :connections channel
+   that yields a new socket client on each connection. Observes value of *flush-on-newline* var for purposes of
+   socket flushing."
   ([port]
    (socket-server port default-server-backlog nil))
   ([port backlog]
