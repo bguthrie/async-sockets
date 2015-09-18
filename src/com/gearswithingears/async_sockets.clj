@@ -29,7 +29,7 @@
     false))
 
 (defrecord AsyncSocket
-  [^Socket socket ^InetSocketAddress address in-ch out-ch])
+  [^Socket socket ^InetSocketAddress address in out])
 (defrecord AsyncSocketServer
   [^Integer port ^Integer backlog ^InetAddress bind-addr ^ServerSocket server connections])
 
